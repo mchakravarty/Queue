@@ -32,14 +32,14 @@ jobs:
           - "platform=iOS Simulator,name=iPhone 16"
           - "platform=tvOS Simulator,name=Apple TV"
           - "platform=watchOS Simulator,name=Apple Watch Series 10 (42mm)"
-          - "platform=visionOS Simulator,name=Apple Vision Pro"
+          - "platform=visionOS Simulator,name=Apple Vision Pro,OS=2.5"
     steps:
       - uses: actions/checkout@v4
       - name: Test platform ${{ matrix.destination }}
         run: set -o pipefail && xcodebuild -scheme Queue -destination "${{ matrix.destination }}" test | xcbeautify
 
   xcode26_test:
-    name: Test Xcode 16
+    name: Test Xcode 26
     timeout-minutes: 30
     runs-on: macos-26
     env:
