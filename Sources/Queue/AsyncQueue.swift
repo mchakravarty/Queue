@@ -70,7 +70,9 @@ public final class AsyncQueue: @unchecked Sendable {
 		defer { lock.unlock() }
 
 		guard let idx = pendingTasks.firstIndex(where: { $0.id == props.id }) else {
-			preconditionFailure("Pending task id not found for \(props)")
+			// This is not a fault. There is a small chance that `executeThrowingOperation(props:operation:)` will call
+			// this method twice for the same task. On the second call, we will land here.
+			return
 		}
 
 		pendingTasks.remove(at: idx)
@@ -140,6 +142,46 @@ public final class AsyncQueue: @unchecked Sendable {
 			throw error
 		}
 	}
+
+	private func executeThrowingOperation<Success>(
+		props: ExecutionProperties,
+		@_inheritActorContext operation: @escaping ThrowingOperation<Success>
+	) async throws -> Success {
+
+		defer {
+			// If the task got cancelled, the cancellation handler will already have completed the task.
+			if !Task.isCancelled { completePendingTask(with: props) }
+		}
+
+		return try await withTaskCancellationHandler {
+
+			for awaitable in props.dependencies {
+				try Task.checkCancellation()
+				await awaitable.waitForCompletion()
+			}
+
+			try Task.checkCancellation()
+
+			do {
+				let result = try await operation()
+				try Task.checkCancellation()
+				return result
+			} catch is CancellationError {
+				throw CancellationError()
+			} catch {
+#if compiler(>=5.9)
+				if attributes.contains(.publishErrors) {
+					errorContinuation.yield(error)
+				}
+#endif
+
+				throw error
+			}
+
+		} onCancel: {
+			completePendingTask(with: props)
+		}
+	}
 }
 
 extension AsyncQueue {
@@ -154,7 +196,7 @@ extension AsyncQueue {
 
 		return createTask(barrier: asBarrier) { props in
 			Task<Success, Error>(priority: priority) {
-				try await executeOperation(props: props, operation: operation)
+				try await executeThrowingOperation(props: props, operation: operation)
 			}
 		}
 	}
